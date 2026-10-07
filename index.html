@@ -1046,9 +1046,9 @@
                         if(!pr.projId) return;
                         const key = `${pr.projId}_${e.dayType}`;
                         if(!map[dateKey].pGroup[key]) {
-                            map[dateKey].pGroup[key] = { projId: pr.projId, name: projMap[pr.projId]||'未知', dayType: e.dayType, count: 0, tasks: new Set() };
+                            map[dateKey].pGroup[key] = { projId: pr.projId, name: projMap[pr.projId]||'未知', dayType: e.dayType, empSet: new Set(), tasks: new Set() };
                         }
-                        map[dateKey].pGroup[key].count += 1;
+                        map[dateKey].pGroup[key].empSet.add(e.id || e.name);
                         map[dateKey].pGroup[key].tasks.add(pr.taskName || '施工');
                     });
                 });
@@ -1058,15 +1058,19 @@
                 const groups = Object.values(day.pGroup);
                 const coverMap = {};
                 groups.forEach(g => {
-                    if(!coverMap[g.projId]) coverMap[g.projId] = { name: g.name, count: 0 };
-                    coverMap[g.projId].count += g.count;
+                    if(!coverMap[g.projId]) coverMap[g.projId] = { name: g.name, empSet: new Set() };
+                    g.empSet.forEach(empId => coverMap[g.projId].empSet.add(empId));
                 });
-                const coverText = Object.values(coverMap).map(c => `${c.name}(${c.count}人)`).join('、');
+                const coverText = Object.values(coverMap).map(c => `${c.name}(${c.empSet.size}人)`).join('、');
                 
                 return {
                     date: day.date,
                     coverText: coverText || '無出勤紀錄',
-                    details: groups.map(g => ({ ...g, taskStr: Array.from(g.tasks).join('、') }))
+                    details: groups.map(g => ({
+                        ...g,
+                        count: g.empSet.size,
+                        taskStr: Array.from(g.tasks).join('、')
+                    }))
                 };
             }).sort((a,b)=>b.date.localeCompare(a.date));
           }, [records, month, projMap]);
@@ -1245,9 +1249,12 @@
                       if(e.dayType==='休假') return;
                       e.projects.forEach(pr => {
                           const pName = projMap[pr.projId] || '未分類工程';
-                          if(!projGrouped[pName]) projGrouped[pName] = { emps: [], tasks: new Set() };
+                          if(!projGrouped[pName]) projGrouped[pName] = { empMap: {}, tasks: new Set() };
                           projGrouped[pName].tasks.add(pr.taskName || '施工');
-                          projGrouped[pName].emps.push({ name: e.name, dayType: e.dayType });
+                          const empKey = e.id || e.name;
+                          if (!projGrouped[pName].empMap[empKey]) {
+                              projGrouped[pName].empMap[empKey] = { name: e.name, dayType: e.dayType };
+                          }
                       });
                   });
 
@@ -1277,14 +1284,15 @@
                       {isExpanded && (
                         <div className="p-2 space-y-2 text-[11px]">
                            {!isHoliday && Object.entries(projGrouped).map(([pName, data], idx) => {
+                              const empsList = Object.values(data.empMap);
                               const taskStr = Array.from(data.tasks).join('、');
-                              const empTypesSet = Array.from(new Set(data.emps.map(e => e.dayType))).join('/');
-                              const empNamesStr = data.emps.map(e => e.name).join('、');
+                              const empTypesSet = Array.from(new Set(empsList.map(e => e.dayType))).join('/');
+                              const empNamesStr = empsList.map(e => e.name).join('、');
                               return (
                                 <div key={idx} className="bg-slate-50/70 p-2 rounded-lg border border-slate-200 space-y-1">
                                    <div className="font-extrabold text-blue-900 text-[11px]">{pName}</div>
                                    <div className="text-slate-800 font-medium">
-                                      工作：{taskStr} ｜ 人數：{data.emps.length}人 ｜ {empTypesSet} ｜ {empNamesStr}
+                                      工作：{taskStr} ｜ 人數：{empsList.length}人 ｜ {empTypesSet} ｜ {empNamesStr}
                                    </div>
                                 </div>
                               );
@@ -1448,9 +1456,10 @@
                       <div className="bg-white border border-slate-200 rounded-lg p-1.5 max-h-40 overflow-y-auto space-y-1">
                         {p.details.map((d, dIdx) => {
                           if(d.labors.length === 0) return null;
-                          const taskNames = d.labors.map(l => l.taskName).join('、');
-                          const totalPersonsCount = d.labors.reduce((sum, l) => sum + l.count, 0);
-                          const allPersons = Array.from(new Set(d.labors.flatMap(l => l.persons))).join('、');
+                          const taskNames = Array.from(new Set(d.labors.map(l => l.taskName))).join('、');
+                          const allPersonsSet = new Set(d.labors.flatMap(l => l.persons));
+                          const allPersons = Array.from(allPersonsSet).join('、');
+                          const totalPersonsCount = allPersonsSet.size;
                           const totalAmt = d.labors.reduce((sum, l) => sum + l.totalAmount, 0);
 
                           return (
